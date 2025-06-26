@@ -13,7 +13,7 @@ def test_list_customers():
 def test_create_customer():
     data = {"name": "Test", "surname": "User", "email": "testuser@example.com"}
     r = client.post("/customers/", json=data)
-    assert r.status_code
+    assert r.status_code == 200
     assert r.json()["email"] == data["email"]
 
 def test_get_customer():
@@ -36,11 +36,11 @@ def test_delete_customer():
     r = client.get(f"/customers/{cid}")
     assert r.status_code == 404
 
+
 def test_list_categories():
     r = client.get("/categories/")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
-
 
 def test_create_category():
     data = {"title": "TestCat", "description": "desc"}
@@ -136,24 +136,51 @@ def test_list_orders():
     r = client.get("/orders/")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
+    # Check schema
+    for order in r.json():
+        assert "id" in order
+        assert "customer_id" in order
+        assert "item_ids" in order
+        assert "customer" in order
+        assert "items" in order
+        assert isinstance(order["items"], list)
 
 def test_create_order():
     # Use existing customer_id 1 and order_item_id 1
     data = {"customer_id": 1, "item_ids": [1]}
     r = client.post("/orders/", json=data)
     assert r.status_code == 200
-    assert r.json()["customer"]["id"] == 1
+    order = r.json()
+    assert order["customer"]["id"] == 1
+    assert order["item_ids"] == [1]
 
 def test_get_order():
-    r = client.get("/orders/1")
+    # Create order to get
+    data = {"customer_id": 1, "item_ids": [1]}
+    r = client.post("/orders/", json=data)
+    oid = r.json()["id"]
+    r = client.get(f"/orders/{oid}")
     assert r.status_code == 200
-    assert "customer" in r.json()
+    order = r.json()
+    assert order["id"] == oid
+    assert order["customer"]["id"] == 1
+    assert isinstance(order["items"], list)
 
 def test_update_order():
+    # Create order to update
     data = {"customer_id": 1, "item_ids": [1]}
-    r = client.put("/orders/1", json=data)
+    r = client.post("/orders/", json=data)
+    oid = r.json()["id"]
+    # Create another order item
+    data_item = {"shop_item_id": 1, "quantity": 2}
+    r_item = client.post("/order_items/", json=data_item)
+    new_item_id = r_item.json()["id"]
+    # Update order to include new item
+    update_data = {"customer_id": 1, "item_ids": [1, new_item_id]}
+    r = client.put(f"/orders/{oid}", json=update_data)
     assert r.status_code == 200
-    assert r.json()["customer"]["id"] == 1
+    order = r.json()
+    assert set(order["item_ids"]) == set([1, new_item_id])
 
 def test_delete_order():
     # Create order to delete

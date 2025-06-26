@@ -320,31 +320,44 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
         item.order_id = db_order.id
     db.commit()
     db.refresh(db_order)
-    return db_order
+    # Compose item_ids for schema compatibility
+    db_order.items = db.query(OrderItemDB).filter(OrderItemDB.order_id == db_order.id).all()
+    for item in db_order.items:
+        item.shop_item = db.query(ShopItemDB).get(item.shop_item_id)
+    item_ids = [item.id for item in db_order.items]
+    return {
+        "id": db_order.id,
+        "customer_id": db_order.customer_id,
+        "item_ids": item_ids,
+        "customer": db_order.customer,
+        "items": db_order.items
+    }
 
 @app.get("/orders/", response_model=List[Order])
 def list_orders(db: Session = Depends(get_db)):
     orders = db.query(OrderDB).all()
-    # Ensure items are filtered by order_id
+    result = []
     for order in orders:
         order.items = db.query(OrderItemDB).filter(OrderItemDB.order_id == order.id).all()
-    return orders
+        for item in order.items:
+            item.shop_item = db.query(ShopItemDB).get(item.shop_item_id)
+        item_ids = [item.id for item in order.items]
+        result.append({
+            "id": order.id,
+            "customer_id": order.customer_id,
+            "item_ids": item_ids,
+            "customer": order.customer,
+            "items": order.items
+        })
+    return result
 
-@app.get("/orders/{order_id}", response_model=Order)
-def get_order(order_id: int, db: Session = Depends(get_db)):
-    order = db.query(OrderDB).get(order_id)
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    order.items = db.query(OrderItemDB).filter(OrderItemDB.order_id == order.id).all()
-    return order
-
-@app.put("/orders/{order_id}", response_model=Order)
-def update_order(order_id: int, order: OrderCreate, db: Session = Depends(get_db)):
-    db_order = db.query(OrderDB).get(order_id)
+@app.put("/orders/{oid}", response_model=Order)
+def update_order_by_oid(oid: int, order: OrderCreate, db: Session = Depends(get_db)):
+    db_order = db.query(OrderDB).get(oid)
     if not db_order:
         raise HTTPException(status_code=404, detail="Order not found")
     db_order.customer_id = order.customer_id
-    # Remove old order items
+    # Unassign all current order items
     db.query(OrderItemDB).filter(OrderItemDB.order_id == db_order.id).update({"order_id": None})
     db.commit()
     # Assign new order items
@@ -354,14 +367,22 @@ def update_order(order_id: int, order: OrderCreate, db: Session = Depends(get_db
     db.commit()
     db.refresh(db_order)
     db_order.items = db.query(OrderItemDB).filter(OrderItemDB.order_id == db_order.id).all()
-    return db_order
+    for item in db_order.items:
+        item.shop_item = db.query(ShopItemDB).get(item.shop_item_id)
+    item_ids = [item.id for item in db_order.items]
+    return {
+        "id": db_order.id,
+        "customer_id": db_order.customer_id,
+        "item_ids": item_ids,
+        "customer": db_order.customer,
+        "items": db_order.items
+    }
 
-@app.delete("/orders/{order_id}")
-def delete_order(order_id: int, db: Session = Depends(get_db)):
-    db_order = db.query(OrderDB).get(order_id)
+@app.delete("/orders/{oid}")
+def delete_order_by_oid(oid: int, db: Session = Depends(get_db)):
+    db_order = db.query(OrderDB).get(oid)
     if not db_order:
         raise HTTPException(status_code=404, detail="Order not found")
-    # Unassign order_id from order items
     db.query(OrderItemDB).filter(OrderItemDB.order_id == db_order.id).update({"order_id": None})
     db.commit()
     db.delete(db_order)
@@ -409,3 +430,64 @@ def startup_populate():
         db.add(order)
         db.commit()
     db.close()
+
+@app.get("/orders/{oid}", response_model=Order)
+def get_order_by_oid(oid: int, db: Session = Depends(get_db)):
+    order = db.query(OrderDB).get(oid)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order.items = db.query(OrderItemDB).filter(OrderItemDB.order_id == order.id).all()
+    for item in order.items:
+        item.shop_item = db.query(ShopItemDB).get(item.shop_item_id)
+    item_ids = [item.id for item in order.items]
+    return {
+        "id": order.id,
+        "customer_id": order.customer_id,
+        "item_ids": item_ids,
+        "customer": order.customer,
+        "items": order.items
+    }
+
+# --- Order by_oid(oid: int, order: OrderCreate, db: Session = Depends(get_db)):
+# Unassign all current order items
+    db.query(OrderItemDB).filter(OrderItemDB.order_id == db_order.id).update({"order_id": None})
+    db.commit()
+    # Assign new order items
+    items = db.query(OrderItemDB).filter(OrderItemDB.id.in_(order.item_ids)).all()
+    for item in items:
+        item.order_id = db_order.id
+    db.commit()
+    db.refresh(db_order)
+    db_order.items = db.query(OrderItemDB).filter(OrderItemDB.order_id == db_order.id).all()
+    for item in db_order.items:
+        item.shop_item = db.query(ShopItemDB).get(item.shop_item_id)
+    item_ids = [item.id for item in db_order.items]
+    return {
+        "id": db_order.id,
+        "customer_id": db_order.customer_id,
+        "item_ids": item_ids,
+        "customer": db_order.customer,
+        "items": db_order.items
+    }
+
+# --- Order by_oid(oid: int, order: OrderCreate, db: Session = Depends(get_db)):
+# Unassign all current order items
+    db.query(OrderItemDB).filter(OrderItemDB.order_id == db_order.id).update({"order_id": None})
+    db.commit()
+    # Assign new order items
+    items = db.query(OrderItemDB).filter(OrderItemDB.id.in_(order.item_ids)).all()
+    for item in items:
+        item.order_id = db_order.id
+    db.commit()
+    db.refresh(db_order)
+    db_order.items = db.query(OrderItemDB).filter(OrderItemDB.order_id == db_order.id).all()
+    for item in db_order.items:
+        item.shop_item = db.query(ShopItemDB).get(item.shop_item_id)
+    item_ids = [item.id for item in db_order.items]
+    return {
+        "id": db_order.id,
+        "customer_id": db_order.customer_id,
+        "item_ids": item_ids,
+        "customer": db_order.customer,
+        "items": db_order.items
+    }
