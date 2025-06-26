@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Table, Text
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Table, Text, exc
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base, Session
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
@@ -138,9 +138,13 @@ def get_db():
 @app.post("/customers/", response_model=Customer)
 def create_customer(customer: CustomerCreate, db: Session = Depends(get_db)):
     db_customer = CustomerDB(**customer.dict())
-    db.add(db_customer)
-    db.commit()
-    db.refresh(db_customer)
+    try:
+        db.add(db_customer)
+        db.commit()
+        db.refresh(db_customer)
+    except exc.IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Email already exists")
     return db_customer
 
 @app.get("/customers/", response_model=List[Customer])
@@ -312,20 +316,26 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     db.refresh(db_order)
     # Add order items
     items = db.query(OrderItemDB).filter(OrderItemDB.id.in_(order.item_ids)).all()
-    db_order.items = items
+    for item in items:
+        item.order_id = db_order.id
     db.commit()
     db.refresh(db_order)
     return db_order
 
 @app.get("/orders/", response_model=List[Order])
 def list_orders(db: Session = Depends(get_db)):
-    return db.query(OrderDB).all()
+    orders = db.query(OrderDB).all()
+    # Ensure items are filtered by order_id
+    for order in orders:
+        order.items = db.query(OrderItemDB).filter(OrderItemDB.order_id == order.id).all()
+    return orders
 
 @app.get("/orders/{order_id}", response_model=Order)
 def get_order(order_id: int, db: Session = Depends(get_db)):
     order = db.query(OrderDB).get(order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    order.items = db.query(OrderItemDB).filter(OrderItemDB.order_id == order.id).all()
     return order
 
 @app.put("/orders/{order_id}", response_model=Order)
@@ -334,10 +344,16 @@ def update_order(order_id: int, order: OrderCreate, db: Session = Depends(get_db
     if not db_order:
         raise HTTPException(status_code=404, detail="Order not found")
     db_order.customer_id = order.customer_id
+    # Remove old order items
+    db.query(OrderItemDB).filter(OrderItemDB.order_id == db_order.id).update({"order_id": None})
+    db.commit()
+    # Assign new order items
     items = db.query(OrderItemDB).filter(OrderItemDB.id.in_(order.item_ids)).all()
-    db_order.items = items
+    for item in items:
+        item.order_id = db_order.id
     db.commit()
     db.refresh(db_order)
+    db_order.items = db.query(OrderItemDB).filter(OrderItemDB.order_id == db_order.id).all()
     return db_order
 
 @app.delete("/orders/{order_id}")
@@ -345,6 +361,9 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
     db_order = db.query(OrderDB).get(order_id)
     if not db_order:
         raise HTTPException(status_code=404, detail="Order not found")
+    # Unassign order_id from order items
+    db.query(OrderItemDB).filter(OrderItemDB.order_id == db_order.id).update({"order_id": None})
+    db.commit()
     db.delete(db_order)
     db.commit()
     return {"ok": True}

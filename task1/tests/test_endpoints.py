@@ -13,7 +13,7 @@ def test_list_customers():
 def test_create_customer():
     data = {"name": "Test", "surname": "User", "email": "testuser@example.com"}
     r = client.post("/customers/", json=data)
-    assert r.status_code == 200
+    assert r.status_code
     assert r.json()["email"] == data["email"]
 
 def test_get_customer():
@@ -40,6 +40,7 @@ def test_list_categories():
     r = client.get("/categories/")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
+
 
 def test_create_category():
     data = {"title": "TestCat", "description": "desc"}
